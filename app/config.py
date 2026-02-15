@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     llm_provider: str = os.getenv("LLM_PROVIDER", "gemini")
     llm_model: str = os.getenv("LLM_MODEL", "gemini-pro") 
     llm_api_key: str = os.getenv("LLM_API_KEY", "") # Generic key for chosen provider
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
 
     # Context API Keys
     pagerduty_api_key: str = os.getenv("PAGERDUTY_API_KEY", "")

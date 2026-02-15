@@ -24,6 +24,10 @@ from app.schemas.engines import SafetyValveResponse
 router = APIRouter()
 
 
+class ConsentUpdate(BaseModel):
+    consent_share_with_manager: Optional[bool] = None
+    consent_share_anonymized: Optional[bool] = None
+
 @router.get("/", response_model=dict)
 def get_my_profile(
     current_user: UserIdentity = Depends(get_current_user_identity),

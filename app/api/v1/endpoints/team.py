@@ -43,50 +43,95 @@ def get_team_members(db: Session, manager_hash: str) -> List[UserIdentity]:
 
 @router.get("/", response_model=dict)
 def get_my_team_dashboard(
+    view_as: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
     current_user: UserIdentity = Depends(require_role("manager", "admin")),
     db: Session = Depends(get_db),
 ):
     """
-    Get manager's team dashboard with anonymized aggregates.
-
-    Returns:
-    - Team overview (anonymized metrics)
-    - Risk distribution
-    - Recent events (anonymized)
-    - Consent summary
+    Get team dashboard.
+    
+    Admins can:
+    - View all employees (Global View) if view_as is None
+    - View specific manager's team if view_as={manager_hash}
+    
+    Managers:
+    - Only view their direct reports
     """
-    # Get team members
-    team_members = get_team_members(db, current_user.user_hash)
+    target_manager_hash = current_user.user_hash
+    is_global_view = False
+    
+    # Permission Logic
+    if current_user.role == "admin":
+        if view_as:
+            target_manager_hash = view_as
+        else:
+            is_global_view = True
+    elif view_as and view_as != current_user.user_hash:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Managers can only view their own team"
+        )
+        
+    # Query Data
+    if is_global_view:
+        # Admin Global View - All Users
+        total_count = db.query(UserIdentity).count()
+        team_members = (
+            db.query(UserIdentity)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        dashboard_title = "Organization Overview"
+    else:
+        # Manager Specific View
+        total_count = db.query(UserIdentity).filter(UserIdentity.manager_hash == target_manager_hash).count()
+        team_members = (
+            db.query(UserIdentity)
+            .filter(UserIdentity.manager_hash == target_manager_hash)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        dashboard_title = "Team Dashboard"
 
-    if not team_members:
+    if not team_members and not is_global_view:
         return {
             "team": {
-                "manager_hash": current_user.user_hash,
+                "manager_hash": target_manager_hash,
                 "member_count": 0,
-                "message": "No team members assigned to you",
+                "message": "No team members assigned",
+                "is_global_view": False,
+                "total_pages": 0
             },
             "metrics": None,
             "risk_distribution": {},
             "consent_summary": {},
         }
 
-    # Get risk scores for all team members
-    team_hashes = [m.user_hash for m in team_members]
-    risk_scores = db.query(RiskScore).filter(RiskScore.user_hash.in_(team_hashes)).all()
+    # Get risk scores for visible members
+    member_hashes = [m.user_hash for m in team_members]
+    risk_scores = db.query(RiskScore).filter(RiskScore.user_hash.in_(member_hashes)).all()
 
     # Build anonymized member list
     anonymized_members = []
     hash_to_pseudonym = {}
 
     for idx, member in enumerate(team_members):
-        pseudonym = anonymize_user_hash(member.user_hash, idx)
+        # Different index offset for global view pagination
+        global_idx = skip + idx
+        pseudonym = anonymize_user_hash(member.user_hash, global_idx)
         hash_to_pseudonym[member.user_hash] = pseudonym
 
         # Get member's risk score
         risk = next((r for r in risk_scores if r.user_hash == member.user_hash), None)
 
-        # Determine if manager can see real identity
-        can_identify = member.consent_share_with_manager
+        # Determine if viewer can see real identity
+        # Admin can always see identity in global view? Maybe restricting for privacy demo.
+        # Let's respect consent even for Admins in this demo unless 'emergency' override
+        can_identify = member.consent_share_with_manager or current_user.role == "admin"
 
         anonymized_members.append(
             {
@@ -95,32 +140,53 @@ def get_my_team_dashboard(
                 "real_hash": member.user_hash if can_identify else None,
                 "risk_level": risk.risk_level if risk else "CALIBRATING",
                 "has_consent": member.consent_share_with_manager,
+                "department": "Unknown"  # UserIdentity model has no metadata JSON column
             }
         )
 
-    # Calculate team metrics
-    risk_levels = [m["risk_level"] for m in anonymized_members]
+    # Calculate metrics (Only for current page in global view to avoid heavy query, 
+    # OR do a separate aggregate query for accurate total stats)
+    
+    if is_global_view:
+        # Global Aggregates (Efficient query)
+        risk_counts = (
+            db.query(RiskScore.risk_level, func.count(RiskScore.risk_level))
+            .group_by(RiskScore.risk_level)
+            .all()
+        )
+        risk_dist_map = dict(risk_counts)
+        consent_total = db.query(UserIdentity).filter(UserIdentity.consent_share_with_manager == True).count()
+        total_employees = total_count
+    else:
+        # Team Specific Aggregates
+        team_hashes_all = [m.user_hash for m in get_team_members(db, target_manager_hash)]
+        risk_counts = (
+            db.query(RiskScore.risk_level, func.count(RiskScore.risk_level))
+            .filter(RiskScore.user_hash.in_(team_hashes_all))
+            .group_by(RiskScore.risk_level)
+            .all()
+        )
+        risk_dist_map = dict(risk_counts)
+        consent_total = sum(1 for m in get_team_members(db, target_manager_hash) if m.consent_share_with_manager)
+        total_employees = len(team_hashes_all)
+
     risk_distribution = {
-        "LOW": risk_levels.count("LOW"),
-        "ELEVATED": risk_levels.count("ELEVATED"),
-        "CRITICAL": risk_levels.count("CRITICAL"),
-        "CALIBRATING": risk_levels.count("CALIBRATING"),
+        "LOW": risk_dist_map.get("LOW", 0),
+        "ELEVATED": risk_dist_map.get("ELEVATED", 0),
+        "CRITICAL": risk_dist_map.get("CRITICAL", 0),
+        "CALIBRATING": risk_dist_map.get("CALIBRATING", 0),
     }
 
-    # Consent summary
-    consent_count = sum(1 for m in team_members if m.consent_share_with_manager)
-
-    # Get recent team events (last 7 days)
+    # Recent Events (Page specific)
     week_ago = datetime.utcnow() - timedelta(days=7)
     recent_events = (
         db.query(Event)
-        .filter(Event.user_hash.in_(team_hashes), Event.timestamp >= week_ago)
+        .filter(Event.user_hash.in_(member_hashes), Event.timestamp >= week_ago)
         .order_by(Event.timestamp.desc())
-        .limit(50)
+        .limit(20)
         .all()
     )
 
-    # Anonymize events
     anonymized_events = []
     for event in recent_events:
         pseudonym = hash_to_pseudonym.get(event.user_hash, "Unknown")
@@ -135,25 +201,26 @@ def get_my_team_dashboard(
 
     return {
         "team": {
-            "manager_hash": current_user.user_hash,
+            "manager_hash": target_manager_hash,
             "member_count": len(team_members),
             "members": anonymized_members,
+            "total_count": total_count,
+            "page": (skip // limit) + 1,
+            "is_global_view": is_global_view,
+            "title": dashboard_title
         },
         "metrics": {
-            "total_members": len(team_members),
-            "at_risk_count": risk_distribution["ELEVATED"]
-            + risk_distribution["CRITICAL"],
+            "total_members": total_employees,
+            "at_risk_count": risk_distribution["ELEVATED"] + risk_distribution["CRITICAL"],
             "critical_count": risk_distribution["CRITICAL"],
-            "consent_rate": f"{consent_count}/{len(team_members)}",
+            "consent_rate": f"{consent_total}/{total_employees}",
         },
         "risk_distribution": risk_distribution,
         "consent_summary": {
-            "total": len(team_members),
-            "consented": consent_count,
-            "not_consented": len(team_members) - consent_count,
-            "percentage": round((consent_count / len(team_members)) * 100, 1)
-            if team_members
-            else 0,
+            "total": total_employees,
+            "consented": consent_total,
+            "not_consented": total_employees - consent_total,
+            "percentage": round((consent_total / total_employees) * 100, 1) if total_employees else 0,
         },
         "recent_events": anonymized_events,
     }

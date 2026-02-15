@@ -246,3 +246,109 @@ class SafetyValve:
         )
         self.db.add(history)
         self.db.commit()
+
+    def seed_risk_history(self, user_hash: str, persona_type: str = "alex_burnout"):
+        """
+        Generate 30 days of historical risk snapshots for the velocity chart.
+        Each persona type gets a different trajectory curve.
+        Called once during persona creation.
+        """
+        from app.models.analytics import RiskHistory
+
+        rng = np.random.default_rng(hash(user_hash) % (2**31))
+        base = datetime.utcnow() - timedelta(days=30)
+
+        trajectories = {
+            "alex_burnout": self._trajectory_burnout,
+            "sarah_gem": self._trajectory_stable_low,
+            "jordan_steady": self._trajectory_flat,
+            "maria_contagion": self._trajectory_contagion,
+        }
+
+        trajectory_fn = trajectories.get(persona_type, self._trajectory_flat)
+        data_points = trajectory_fn(rng)
+
+        for day_offset, (velocity, belongingness, risk_level, confidence) in enumerate(data_points):
+            timestamp = base + timedelta(days=day_offset, hours=rng.integers(9, 18))
+            entry = RiskHistory(
+                user_hash=user_hash,
+                risk_level=risk_level,
+                velocity=velocity,
+                confidence=confidence,
+                belongingness_score=belongingness,
+                timestamp=timestamp,
+            )
+            self.db.add(entry)
+
+        self.db.commit()
+
+    @staticmethod
+    def _trajectory_burnout(rng):
+        """Alex: Normal → Drift → Crash over 30 days"""
+        points = []
+        for day in range(30):
+            if day < 7:
+                vel = float(rng.normal(0.3, 0.1))
+                belong = float(rng.normal(0.7, 0.05))
+                risk = "LOW"
+            elif day < 14:
+                vel = float(rng.normal(0.8, 0.2))
+                belong = float(rng.normal(0.55, 0.05))
+                risk = "LOW"
+            elif day < 21:
+                vel = float(rng.normal(1.8, 0.3))
+                belong = float(rng.normal(0.4, 0.05))
+                risk = "ELEVATED"
+            else:
+                vel = float(rng.normal(3.0 + (day - 21) * 0.2, 0.3))
+                belong = float(rng.normal(0.25, 0.05))
+                risk = "CRITICAL"
+            conf = min(0.3 + day * 0.02, 0.85)
+            points.append((round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2)))
+        return points
+
+    @staticmethod
+    def _trajectory_stable_low(rng):
+        """Sarah: Consistently low risk, high belongingness"""
+        points = []
+        for day in range(30):
+            vel = float(rng.normal(-0.2, 0.15))
+            belong = float(rng.normal(0.8, 0.05))
+            risk = "LOW"
+            conf = min(0.4 + day * 0.02, 0.9)
+            points.append((round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2)))
+        return points
+
+    @staticmethod
+    def _trajectory_flat(rng):
+        """Jordan: Steady, minimal variation"""
+        points = []
+        for day in range(30):
+            vel = float(rng.normal(0.1, 0.1))
+            belong = float(rng.normal(0.6, 0.05))
+            risk = "LOW"
+            conf = min(0.35 + day * 0.015, 0.8)
+            points.append((round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2)))
+        return points
+
+    @staticmethod
+    def _trajectory_contagion(rng):
+        """Maria: Normal then sudden negative spike in last week"""
+        points = []
+        for day in range(30):
+            if day < 14:
+                vel = float(rng.normal(0.2, 0.1))
+                belong = float(rng.normal(0.65, 0.05))
+                risk = "LOW"
+            elif day < 21:
+                vel = float(rng.normal(1.2, 0.3))
+                belong = float(rng.normal(0.45, 0.05))
+                risk = "ELEVATED"
+            else:
+                vel = float(rng.normal(2.5 + (day - 21) * 0.3, 0.3))
+                belong = float(rng.normal(0.3, 0.05))
+                risk = "CRITICAL"
+            conf = min(0.3 + day * 0.02, 0.85)
+            points.append((round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2)))
+        return points
+

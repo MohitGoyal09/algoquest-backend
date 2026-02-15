@@ -16,17 +16,13 @@ IdentityBase.metadata.create_all(engine)
 
 app = FastAPI(title="Sentinel - Three Engine System")
 
-# Read allowed origins from Settings (sourced from .env ALLOWED_ORIGINS)
-settings = get_settings()
-allowed_origins = [origin.strip() for origin in settings.allowed_origins.split(",")]
-
+# CORS — allow all origins for development
+# TODO: Restrict in production via ALLOWED_ORIGINS env var
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=True,
-    allow_credentials=True,
 )
 
 from app.api.websocket import router as ws_router

@@ -16,6 +16,14 @@ class Event(Base):
     target_user_hash = Column(String(64), nullable=True)  # For graph edges
     metadata_ = Column("metadata", JSON) # Renamed to avoid reserved keyword conflict if any, but mapping to "metadata" column
 
+    def to_dict(self):
+        return {
+            "user_hash": self.user_hash,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "event_type": self.event_type,
+            "metadata": self.metadata_
+        }
+
 class RiskScore(Base):
     """Safety Valve outputs"""
     __tablename__ = "risk_scores"

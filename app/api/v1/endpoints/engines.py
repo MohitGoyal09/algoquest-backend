@@ -6,6 +6,7 @@ from app.services.safety_valve import SafetyValve
 from app.services.talent_scout import TalentScout
 from app.services.culture_temp import CultureThermometer
 from app.services.simulation import RealTimeSimulator
+from app.services.sir_model import predict_contagion_risk
 from app.models.analytics import Event
 from app.core.vault import VaultManager
 from app.api.deps import get_db
@@ -14,6 +15,7 @@ from app.schemas.engines import (
     CreatePersonaRequest,
     InjectEventRequest,
     AnalyzeTeamRequest,
+    ForecastRequest,
     SimulationResponse,
     SafetyValveResponse,
     TalentScoutResponse,
@@ -130,6 +132,11 @@ def create_persona(
             db.add(edge)
 
     db.commit()
+
+    # Seed 30 days of historical risk data for the velocity chart
+    engine = SafetyValve(db)
+    engine.seed_risk_history(user_hash, request.persona_type)
+
     background_tasks.add_task(run_all_engines, user_hash)
 
     return SimulationResponse(
@@ -210,7 +217,7 @@ def analyze_user_network(
     check_user_data_access(db, current_user, user_hash)
 
     engine = TalentScout(db)
-    result = engine.analyze(user_hash)
+    result = engine.analyze_network(user_hash)
     return TalentScoutResponse(success=True, data=result)
 
 
@@ -236,6 +243,55 @@ def analyze_team_culture(
     return CultureThermometerResponse(success=True, data=result)
 
 
+@router.post("/teams/forecast")
+def get_team_forecast(
+    request: ForecastRequest,
+    db: Session = Depends(get_db),
+    current_user: UserIdentity = Depends(get_current_user_identity),
+):
+    """
+    Get SIR epidemic forecast for team contagion risk.
+
+    Request body:
+    - team_hashes: List of user hashes to analyze
+    - days: Forecast horizon (default: 30)
+    """
+    from app.models.analytics import RiskScore, GraphEdge
+
+    team_hashes = request.team_hashes
+    days = request.days
+
+    if not team_hashes:
+        users = db.query(UserIdentity).all()
+        team_hashes = [u.user_hash for u in users]
+
+    total_members = len(team_hashes)
+
+    risks = db.query(RiskScore).filter(RiskScore.user_hash.in_(team_hashes)).all()
+    infected_count = sum(1 for r in risks if r.risk_level in ["ELEVATED", "CRITICAL"])
+    avg_risk_score = sum(r.velocity or 0 for r in risks) / len(risks) if risks else 0
+
+    edges = (
+        db.query(GraphEdge)
+        .filter(
+            GraphEdge.source_hash.in_(team_hashes),
+            GraphEdge.target_hash.in_(team_hashes),
+        )
+        .all()
+    )
+    avg_connections = len(edges) * 2 / total_members if total_members > 0 else 0
+
+    result = predict_contagion_risk(
+        total_members=total_members,
+        infected_count=infected_count,
+        avg_connections=avg_connections,
+        avg_risk_score=avg_risk_score,
+        days=days,
+    )
+
+    return {"success": True, "data": result}
+
+
 @router.get("/users/{user_hash}/nudge", response_model=NudgeResponse)
 def get_nudge(
     user_hash: str,
@@ -247,8 +303,44 @@ def get_nudge(
     check_user_data_access(db, current_user, user_hash)
 
     engine = SafetyValve(db)
-    result = engine.suggest_nudge(user_hash)
-    return NudgeResponse(success=True, data=result)
+    analysis = engine.analyze(user_hash)
+
+    risk_level = analysis.get("risk_level", "LOW")
+
+    # Build nudge based on risk analysis
+    if risk_level == "CRITICAL":
+        nudge_type = "urgent_intervention"
+        message = (
+            "We've noticed some intense work patterns over the past couple of weeks. "
+            "Taking a short break or blocking tomorrow morning for recovery could help maintain your performance."
+        )
+        actions = [
+            {"label": "Block recovery time", "action": "block_recovery"},
+            {"label": "Talk to someone", "action": "request_support"},
+            {"label": "I'm fine", "action": "dismiss"},
+        ]
+    elif risk_level == "ELEVATED":
+        message = (
+            "Your focus sessions have been extending later recently. "
+            "Consider joining the next team sync to reconnect with your colleagues."
+        )
+        nudge_type = "gentle_check_in"
+        actions = [
+            {"label": "Schedule break", "action": "schedule_break"},
+            {"label": "Dismiss", "action": "dismiss"},
+        ]
+    else:
+        # LOW or CALIBRATING — no nudge needed
+        return NudgeResponse(success=True, data=None)
+
+    nudge_data = {
+        "user_hash": user_hash,
+        "nudge_type": nudge_type,
+        "message": message,
+        "risk_level": risk_level,
+        "actions": actions,
+    }
+    return NudgeResponse(success=True, data=nudge_data)
 
 
 @router.get("/events", response_model=ActivityEventResponse)
@@ -259,7 +351,13 @@ def list_events(
     current_user: UserIdentity = Depends(get_current_user_identity),
 ):
     """Get recent activity stream"""
-    events = db.query(Event).order_by(Event.timestamp.desc()).offset(offset).limit(limit).all()
+    events = (
+        db.query(Event)
+        .order_by(Event.timestamp.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return ActivityEventResponse(
         success=True, data=[e.to_dict() for e in events], count=len(events)
     )
@@ -277,7 +375,7 @@ def list_users(
 ):
     """
     List all users with their current risk scores (paginated)
-    
+
     Query params:
     - skip: Number of records to skip (pagination offset)
     - limit: Maximum number of records to return (default: 50)
@@ -285,36 +383,42 @@ def list_users(
     from app.models.analytics import RiskScore
     from app.models.identity import UserIdentity
     from sqlalchemy import desc
-    
+
     # Use efficient pagination with JOIN in a single query
     # Get users with their latest risk scores in one query using subquery
-    latest_risk = db.query(
-        RiskScore.user_hash,
-        RiskScore.risk_level,
-        RiskScore.velocity,
-        RiskScore.confidence,
-        RiskScore.updated_at
-    ).distinct(RiskScore.user_hash).order_by(
-        RiskScore.user_hash, desc(RiskScore.updated_at)
-    ).subquery()
-    
+    latest_risk = (
+        db.query(
+            RiskScore.user_hash,
+            RiskScore.risk_level,
+            RiskScore.velocity,
+            RiskScore.confidence,
+            RiskScore.updated_at,
+        )
+        .distinct(RiskScore.user_hash)
+        .order_by(RiskScore.user_hash, desc(RiskScore.updated_at))
+        .subquery()
+    )
+
     # Join with users
-    users = db.query(
-        UserIdentity.user_hash,
-        UserIdentity.email_encrypted,
-        latest_risk.c.risk_level,
-        latest_risk.c.velocity,
-        latest_risk.c.confidence,
-        latest_risk.c.updated_at
-    ).outerjoin(
-        latest_risk,
-        UserIdentity.user_hash == latest_risk.c.user_hash
-    ).offset(skip).limit(limit).all()
-    
+    users = (
+        db.query(
+            UserIdentity.user_hash,
+            UserIdentity.email_encrypted,
+            latest_risk.c.risk_level,
+            latest_risk.c.velocity,
+            latest_risk.c.confidence,
+            latest_risk.c.updated_at,
+        )
+        .outerjoin(latest_risk, UserIdentity.user_hash == latest_risk.c.user_hash)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
     result = []
     for user in users:
         user_hash, email_encrypted, risk_level, velocity, confidence, updated_at = user
-        
+
         # Attempt to derive name from encrypted email
         name = f"User {user_hash[:4]}"
         role = "Engineer"
@@ -330,12 +434,12 @@ def list_users(
                     name = raw.replace("encrypted_", "").split("@")[0].title()
             except Exception:
                 pass
-        
+
         if "Alex" in name:
             role = "Senior Engineer"
         if "Sarah" in name:
             role = "Tech Lead"
-        
+
         result.append(
             {
                 "user_hash": user_hash,
@@ -347,7 +451,7 @@ def list_users(
                 "updated_at": updated_at.isoformat() if updated_at else None,
             }
         )
-    
+
     return UserListResponse(success=True, data=result)
 
 
@@ -362,17 +466,17 @@ def get_risk_history(
     current_user: UserIdentity = Depends(get_current_user_identity),
 ):
     """Get historical risk scores for a user"""
-    from app.models.analytics import RiskScore
+    from app.models.analytics import RiskHistory
 
     # RBAC Check
     check_user_data_access(db, current_user, user_hash)
 
     cutoff = datetime.utcnow() - timedelta(days=days)
     history = (
-        db.query(RiskScore)
-        .filter(RiskScore.user_hash == user_hash)
-        .filter(RiskScore.updated_at >= cutoff)
-        .order_by(RiskScore.updated_at.asc())
+        db.query(RiskHistory)
+        .filter(RiskHistory.user_hash == user_hash)
+        .filter(RiskHistory.timestamp >= cutoff)
+        .order_by(RiskHistory.timestamp.asc())
         .all()
     )
 
@@ -382,9 +486,10 @@ def get_risk_history(
             "user_hash": user_hash,
             "history": [
                 {
-                    "timestamp": r.updated_at.isoformat(),
+                    "timestamp": r.timestamp.isoformat(),
                     "risk_level": r.risk_level,
                     "velocity": r.velocity,
+                    "belongingness_score": r.belongingness_score,
                 }
                 for r in history
             ],
@@ -452,6 +557,39 @@ def get_global_network(
     """Get global network metrics"""
     engine = TalentScout(db)
     return {"success": True, "data": engine.get_network_metrics()}
+
+
+# ============ ADMIN / SEED ============
+
+
+@router.post("/users/{user_hash}/seed-history")
+def seed_user_history(
+    user_hash: str,
+    persona_type: str = "alex_burnout",
+    db: Session = Depends(get_db),
+):
+    """Seed 30 days of historical risk data for an existing user (admin/demo use)"""
+    from app.models.analytics import RiskHistory
+
+    # Check if history already exists
+    existing = db.query(RiskHistory).filter_by(user_hash=user_hash).count()
+    if existing > 5:
+        return {
+            "success": True,
+            "data": {
+                "message": f"History already has {existing} records",
+                "seeded": False,
+            },
+        }
+
+    engine = SafetyValve(db)
+    engine.seed_risk_history(user_hash, persona_type)
+    new_count = db.query(RiskHistory).filter_by(user_hash=user_hash).count()
+
+    return {
+        "success": True,
+        "data": {"message": f"Seeded {new_count} history records", "seeded": True},
+    }
 
 
 # ============ DASHBOARD AGGREGATES ============

@@ -18,17 +18,26 @@ async def personal_dashboard_ws(
     WebSocket for individual employee dashboard.
     Receives real-time risk updates.
     """
+    print(
+        f"WS Connection attempt for user_hash: '{user_hash}' (type: {type(user_hash)})"
+    )
+
     # Accept connection FIRST per WebSocket protocol (RFC 6455)
     await websocket.accept()
-    print(f"WS Connection attempt for user_hash: {user_hash}")
 
-    if not user_hash or user_hash.strip() == "":
-        print(f"WS Rejected: Empty user_hash")
-        await websocket.close(code=4000, reason="Empty user_hash")
+    # Validate after accepting
+    if (
+        not user_hash
+        or user_hash.strip() == ""
+        or user_hash == "undefined"
+        or user_hash == "null"
+    ):
+        print(f"WS Rejected: Invalid user_hash: '{user_hash}'")
+        await websocket.close(code=4000, reason="Invalid user_hash")
         return
 
     if user_hash == "global":
-        manager.connect(websocket, user_hash="global")
+        await manager.connect(websocket, user_hash="global")
         try:
             while True:
                 data = await websocket.receive_json()
@@ -48,7 +57,7 @@ async def personal_dashboard_ws(
         await websocket.close(code=4001, reason="Invalid user")
         return
 
-    manager.connect(websocket, user_hash=user_hash)
+    await manager.connect(websocket, user_hash=user_hash)
 
     try:
         while True:
@@ -76,7 +85,7 @@ async def admin_dashboard_ws(websocket: WebSocket):
     """
     # Accept connection FIRST per WebSocket protocol (RFC 6455)
     await websocket.accept()
-    manager.connect(websocket, user_hash=None)  # None = admin channel
+    await manager.connect(websocket, user_hash=None)  # None = admin channel
 
     try:
         while True:

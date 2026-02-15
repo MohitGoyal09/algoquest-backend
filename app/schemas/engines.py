@@ -1,23 +1,33 @@
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Dict, Any
 
+
 # Request Models
 class CreatePersonaRequest(BaseModel):
     email: EmailStr
     persona_type: str  # alex_burnout, sarah_gem, jordan_steady
 
+
 class InjectEventRequest(BaseModel):
     user_hash: str
     current_risk: str
 
+
 class AnalyzeTeamRequest(BaseModel):
     team_hashes: List[str]
+
+
+class ForecastRequest(BaseModel):
+    team_hashes: List[str]
+    days: int = 30
+
 
 # Response Models (API Envelope Pattern)
 class APIResponse(BaseModel):
     success: bool = True
     data: Optional[Any] = None
     error: Optional[str] = None
+
 
 class SafetyValveData(BaseModel):
     engine: str
@@ -30,12 +40,14 @@ class SafetyValveData(BaseModel):
     status: Optional[str] = "ACTIVE"
     days_collected: Optional[int] = 0
 
+
 class TalentScoutPerformer(BaseModel):
     user_hash: str
     betweenness: float
     eigenvector: float
     unblocking: int
     is_hidden_gem: bool
+
 
 class GraphNode(BaseModel):
     id: str
@@ -47,12 +59,14 @@ class GraphNode(BaseModel):
     is_hidden_gem: Optional[bool] = False
     x: Optional[float] = 0.0
     y: Optional[float] = 0.0
-    
+
+
 class GraphEdge(BaseModel):
     source: str
     target: str
     weight: float
     edge_type: str = "collaboration"
+
 
 class TalentScoutData(BaseModel):
     engine: str
@@ -60,11 +74,13 @@ class TalentScoutData(BaseModel):
     nodes: Optional[List[GraphNode]] = []
     edges: Optional[List[GraphEdge]] = []
 
+
 class CultureThermometerMetrics(BaseModel):
     avg_velocity: float
     critical_members: int
     graph_fragmentation: float
     comm_decay_rate: float
+
 
 class CultureThermometerData(BaseModel):
     engine: str
@@ -72,10 +88,12 @@ class CultureThermometerData(BaseModel):
     metrics: CultureThermometerMetrics
     recommendation: str
 
+
 class SimulationData(BaseModel):
     user_hash: str
     events_count: int
     persona: str
+
 
 class EventData(BaseModel):
     user_hash: str
@@ -85,25 +103,32 @@ class EventData(BaseModel):
     description: Optional[str] = None
     risk_impact: Optional[str] = "neutral"
 
+
 class RealtimeEventData(BaseModel):
     new_event: EventData
     updated_risk: SafetyValveData
+
 
 # Typed API Responses
 class SafetyValveResponse(APIResponse):
     data: Optional[SafetyValveData] = None
 
+
 class TalentScoutResponse(APIResponse):
     data: Optional[TalentScoutData] = None
+
 
 class CultureThermometerResponse(APIResponse):
     data: Optional[CultureThermometerData] = None
 
+
 class SimulationResponse(APIResponse):
     data: Optional[SimulationData] = None
 
+
 class RealtimeInjectionResponse(APIResponse):
     data: Optional[RealtimeEventData] = None
+
 
 class UserSummary(BaseModel):
     user_hash: str
@@ -114,25 +139,34 @@ class UserSummary(BaseModel):
     confidence: Optional[float] = None
     updated_at: Optional[str] = None
 
+
 class UserListResponse(APIResponse):
     data: Optional[List[UserSummary]] = None
+
 
 class RiskHistoryEntry(BaseModel):
     timestamp: str
     risk_level: str
     velocity: float
-    confidence: float
-    belongingness_score: float
+
+
+class RiskHistoryData(BaseModel):
+    user_hash: str
+    history: List[RiskHistoryEntry]
+
 
 class RiskHistoryResponse(APIResponse):
-    data: Optional[List[RiskHistoryEntry]] = None
+    data: Optional[RiskHistoryData] = None
+
 
 class ActivityEventResponse(APIResponse):
     data: Optional[List[EventData]] = None
 
+
 class NudgeAction(BaseModel):
     label: str
     action: str
+
 
 class NudgeData(BaseModel):
     user_hash: str
@@ -140,6 +174,7 @@ class NudgeData(BaseModel):
     message: str
     risk_level: str
     actions: List[NudgeAction]
+
 
 class NudgeResponse(APIResponse):
     data: Optional[NudgeData] = None
