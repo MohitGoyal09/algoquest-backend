@@ -1,9 +1,9 @@
 """
 Supabase client initialization for backend authentication.
 """
-import os
 from supabase import create_client, Client
 from functools import lru_cache
+from app.config import get_settings
 
 from app.config import get_settings
 
@@ -18,3 +18,4 @@ def get_supabase_client() -> Client:
         raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in .env")
     
     return create_client(url, key)
+

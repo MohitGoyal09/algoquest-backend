@@ -39,7 +39,7 @@ class ConnectionManager:
             for connection in self.active_connections[user_hash]:
                 try:
                     await connection.send_json(message)
-                except:
+                except Exception:
                     dead_connections.append(connection)
             
             # Cleanup dead connections
@@ -53,7 +53,7 @@ class ConnectionManager:
         for connection in self.admin_connections:
             try:
                 await connection.send_json(message)
-            except:
+            except Exception:
                 dead_connections.append(connection)
         
         for dead in dead_connections:
