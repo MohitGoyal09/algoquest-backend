@@ -12,8 +12,10 @@ class ConnectionManager:
         # Admin/manager dashboards
         self.admin_connections: List[WebSocket] = []
     
-    async def connect(self, websocket: WebSocket, user_hash: Optional[str] = None):
-        await websocket.accept()
+    def connect(self, websocket: WebSocket, user_hash: Optional[str] = None):
+        # Note: websocket.accept() should already be called before this method
+        # per WebSocket protocol (RFC 6455) - connection must be accepted before
+        # any other operations
         if user_hash:
             if user_hash not in self.active_connections:
                 self.active_connections[user_hash] = []
