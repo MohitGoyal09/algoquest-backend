@@ -63,6 +63,10 @@ def check_user_data_access(
         # Demo mode - allow access
         return
 
+    if target_user_hash == "global":
+        # Allow global access for team views (handled by engine logic)
+        return
+
     perm_service = PermissionService(db)
     can_view, reason = perm_service.can_view_user_data(current_user, target_user_hash)
 

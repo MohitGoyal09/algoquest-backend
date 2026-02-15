@@ -15,9 +15,10 @@ app = FastAPI(title="Sentinel - Three Engine System")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 from app.api.websocket import router as ws_router
@@ -25,9 +26,14 @@ from app.api.websocket import router as ws_router
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(ws_router, prefix="/ws")
 
+
 @app.get("/")
 def root():
-    return {"status": "Sentinel", "engines": ["Safety Valve", "Talent Scout", "Culture Thermometer"]}
+    return {
+        "status": "Sentinel",
+        "engines": ["Safety Valve", "Talent Scout", "Culture Thermometer"],
+    }
+
 
 @app.get("/health")
 def health_check():

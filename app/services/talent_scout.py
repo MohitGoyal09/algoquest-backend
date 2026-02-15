@@ -24,8 +24,10 @@ class TalentScout:
             return {"status": "NO_DATA"}
 
         # Calculate metrics
-        # Calculate metrics
-        betweenness = nx.betweenness_centrality(G, weight="weight")
+        # Use k-approximation for betweenness if graph is large (>100 nodes)
+        # This significantly reduces computation time from O(VE) to O(kE)
+        k = 100 if len(G) > 100 else None
+        betweenness = nx.betweenness_centrality(G, weight="weight", k=k)
         eigenvector = self._calculate_eigenvector_centrality(G)
         unblocking = self._calculate_unblocking_metrics(G)
 
