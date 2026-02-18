@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional, List
-from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.models.analytics import RiskScore, Event, RiskHistory, CentralityScore
@@ -10,71 +9,22 @@ from app.models.identity import UserIdentity
 from app.api.deps.auth import get_current_user_identity
 from app.services.llm import llm_service
 from app.services.permission_service import PermissionService
+from app.schemas.ai import (
+    ChatRequest,
+    ChatResponse,
+    ChatContextUsed,
+    AgendaRequest,
+    AgendaResponse,
+    TalkingPoint,
+    SuggestedAction,
+    QueryRequest,
+    QueryResult,
+    QueryResponse,
+    NarrativeReportResponse,
+    TeamReportResponse,
+)
 
 router = APIRouter()
-
-
-class AgendaRequest(BaseModel):
-    user_hash: str
-
-
-class TalkingPoint(BaseModel):
-    text: str
-    type: str
-
-
-class SuggestedAction(BaseModel):
-    label: str
-    action: str
-
-
-class AgendaResponse(BaseModel):
-    user_hash: str
-    risk_level: str
-    talking_points: List[TalkingPoint]
-    suggested_actions: List[SuggestedAction]
-    generated_at: str
-
-
-class QueryRequest(BaseModel):
-    query: str
-    user_role: str = "admin"
-
-
-class QueryResult(BaseModel):
-    user_hash: str
-    name: str
-    risk_level: Optional[str] = None
-    velocity: Optional[float] = None
-    betweenness: Optional[float] = None
-    eigenvector: Optional[float] = None
-    skills: List[str] = []
-    tenure_months: Optional[int] = None
-
-
-class QueryResponse(BaseModel):
-    query: str
-    response: str
-    results: List[QueryResult]
-    query_type: str
-
-
-class NarrativeReportResponse(BaseModel):
-    user_hash: str
-    narrative: str
-    trend: str
-    key_insights: List[str]
-    generated_at: str
-
-
-class TeamReportResponse(BaseModel):
-    team_id: str
-    narrative: str
-    trend: str
-    key_insights: List[str]
-    member_count: int
-    at_risk_count: int
-    generated_at: str
 
 
 def get_user_risk_context(db: Session, user_hash: str) -> dict:
@@ -1015,3 +965,248 @@ async def semantic_query(
         results=query_results,
         query_type=intent["query_type"],
     )
+
+
+# Role-aware system prompts for chat
+ROLE_SYSTEM_PROMPTS = {
+    "employee": """You are a supportive AI wellbeing companion for employees.
+
+Your focus areas:
+- Personal wellbeing and work-life balance
+- Career growth and skill development
+- Preparation for 1:1 conversations with managers
+- Understanding personal work patterns and stress indicators
+- Self-care recommendations and resources
+
+Guidelines:
+- Be encouraging and non-judgmental
+- Focus on personal agency and control
+- Provide actionable self-improvement suggestions
+- Help interpret personal metrics in a positive light
+- Suggest concrete steps for career development
+- Never use surveillance or monitoring language
+- Frame everything as self-discovery and growth
+
+Tone: Supportive, empowering, personal growth focused""",
+    "manager": """You are a management insights assistant focused on team health and performance.
+
+Your focus areas:
+- Team risk analysis and early warning indicators
+- Individual team member support strategies
+- Workload distribution and balance
+- Team collaboration patterns and blockers
+- 1:1 preparation and talking points
+- Retention risk identification
+
+Guidelines:
+- Frame insights as opportunities for support, not criticism
+- Respect privacy and consent boundaries
+- Focus on actionable managerial interventions
+- Balance team needs with individual care
+- Provide context about when to escalate concerns
+- Emphasize proactive leadership and team building
+- Never frame data as surveillance
+
+Tone: Professional, supportive, leadership focused""",
+    "admin": """You are an organizational analytics assistant for HR and leadership.
+
+Your focus areas:
+- Organization-wide wellbeing trends
+- Department-level risk aggregation
+- Policy effectiveness and impact
+- Resource allocation recommendations
+- Compliance and audit insights
+- Strategic workforce planning
+
+Guidelines:
+- Provide high-level strategic insights
+- Focus on patterns across groups, not individuals
+- Suggest policy and process improvements
+- Identify systemic issues and opportunities
+- Maintain strict privacy in all aggregations
+- Support data-driven decision making
+- Balance organizational needs with employee welfare
+
+Tone: Strategic, analytical, organizational focus""",
+}
+
+
+def get_user_context_data(db: Session, user_hash: str) -> dict:
+    """Fetch relevant context data for chat based on user's role and data."""
+    risk_score = db.query(RiskScore).filter_by(user_hash=user_hash).first()
+    identity = db.query(UserIdentity).filter_by(user_hash=user_hash).first()
+    centrality = db.query(CentralityScore).filter_by(user_hash=user_hash).first()
+
+    context = {
+        "user_hash": user_hash,
+        "risk_level": risk_score.risk_level if risk_score else "LOW",
+        "velocity": risk_score.velocity if risk_score else 0.0,
+        "belongingness": risk_score.thwarted_belongingness if risk_score else 0.5,
+        "confidence": risk_score.confidence if risk_score else 0.0,
+        "role": identity.role if identity else "employee",
+        "betweenness": centrality.betweenness if centrality else 0.0,
+        "eigenvector": centrality.eigenvector if centrality else 0.0,
+        "unblocking_count": centrality.unblocking_count if centrality else 0,
+    }
+
+    # Add team context for managers
+    if identity and identity.role == "manager":
+        team_members = db.query(UserIdentity).filter_by(manager_hash=user_hash).all()
+        if team_members:
+            member_hashes = [m.user_hash for m in team_members]
+            team_risks = (
+                db.query(RiskScore).filter(RiskScore.user_hash.in_(member_hashes)).all()
+            )
+
+            at_risk_count = sum(
+                1 for r in team_risks if r.risk_level in ["ELEVATED", "CRITICAL"]
+            )
+            critical_count = sum(1 for r in team_risks if r.risk_level == "CRITICAL")
+
+            context["team_size"] = len(team_members)
+            context["team_at_risk_count"] = at_risk_count
+            context["team_critical_count"] = critical_count
+
+    # Add organization context for admins
+    if identity and identity.role == "admin":
+        all_risks = db.query(RiskScore).all()
+        total_users = len(all_risks)
+        org_at_risk = sum(
+            1 for r in all_risks if r.risk_level in ["ELEVATED", "CRITICAL"]
+        )
+        org_critical = sum(1 for r in all_risks if r.risk_level == "CRITICAL")
+
+        context["org_total_users"] = total_users
+        context["org_at_risk_count"] = org_at_risk
+        context["org_critical_count"] = org_critical
+        context["org_risk_percentage"] = (
+            (org_at_risk / total_users * 100) if total_users > 0 else 0
+        )
+
+    return context
+
+
+def build_chat_prompt(
+    message: str, role: str, context: dict, conversation_history: Optional[str] = None
+) -> str:
+    """Build the complete prompt for the chat including system prompt and context."""
+    system_prompt = ROLE_SYSTEM_PROMPTS.get(role, ROLE_SYSTEM_PROMPTS["employee"])
+
+    # Format context based on role
+    context_str = format_context_for_role(context, role)
+
+    prompt = f"""{system_prompt}
+
+USER CONTEXT:
+{context_str}
+
+{"PREVIOUS CONVERSATION:\n" + conversation_history + "\n" if conversation_history else ""}USER MESSAGE:
+{message}
+
+Provide a helpful, personalized response based on the user's role ({role}) and their context. Be concise but informative."""
+
+    return prompt
+
+
+def format_context_for_role(context: dict, role: str) -> str:
+    """Format context data appropriately for the user's role."""
+    if role == "employee":
+        return f"""- Personal Risk Level: {context["risk_level"]}
+- Work Pattern Velocity: {context["velocity"]:.2f} (higher = more variable schedule)
+- Social Engagement: {context["belongingness"]:.2f} (higher = more connected)
+- Network Influence: {context["betweenness"]:.2f} (how much you unblock others)"""
+
+    elif role == "manager":
+        team_context = ""
+        if "team_size" in context:
+            team_context = f"""
+- Team Size: {context["team_size"]}
+- Team Members At Risk: {context.get("team_at_risk_count", 0)}
+- Critical Cases: {context.get("team_critical_count", 0)}"""
+
+        return f"""- Your Role: Manager
+- Personal Metrics: Risk {context["risk_level"]}, Velocity {context["velocity"]:.2f}{team_context}"""
+
+    elif role == "admin":
+        org_context = ""
+        if "org_total_users" in context:
+            org_context = f"""
+- Organization Size: {context["org_total_users"]}
+- Users At Risk: {context["org_at_risk_count"]} ({context.get("org_risk_percentage", 0):.1f}%)
+- Critical Cases: {context["org_critical_count"]}"""
+
+        return f"""- Your Role: Administrator
+- Personal Risk Level: {context["risk_level"]}{org_context}"""
+
+    return f"- Risk Level: {context['risk_level']}\n- Role: {role}"
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(
+    request: ChatRequest,
+    current_user: UserIdentity = Depends(get_current_user_identity),
+    db: Session = Depends(get_db),
+):
+    """
+    Role-aware AI chat endpoint.
+
+    Provides personalized responses based on user role:
+    - Employee: Focus on personal wellbeing, growth, 1:1 prep
+    - Manager: Focus on team insights, risk analysis
+    - Admin: Focus on organization analytics
+
+    Includes user's actual data context (risk level, etc.) in responses.
+    """
+    try:
+        # Get user's role and context
+        user_role = current_user.role or "employee"
+        user_context = get_user_context_data(db, current_user.user_hash)
+
+        # Merge request context with user context
+        if request.context:
+            user_context.update(request.context)
+
+        # Build role-aware prompt
+        # TODO: In production, fetch conversation history if conversation_id provided
+        conversation_history = None
+        prompt = build_chat_prompt(
+            message=request.message,
+            role=user_role,
+            context=user_context,
+            conversation_history=conversation_history,
+        )
+
+        # Generate response using LLM
+        try:
+            llm_response = llm_service.generate_insight(prompt)
+        except Exception as e:
+            # Fallback response if LLM fails
+            llm_response = "I apologize, but I'm having trouble generating a response right now. Please try again in a moment."
+
+        # Generate conversation ID if not provided (for tracking)
+        conversation_id = (
+            request.conversation_id
+            or f"chat_{current_user.user_hash}_{datetime.utcnow().timestamp()}"
+        )
+
+        return ChatResponse(
+            response=llm_response,
+            role=user_role,
+            conversation_id=conversation_id,
+            context_used=ChatContextUsed(
+                risk_level=user_context.get("risk_level"),
+                velocity=user_context.get("velocity"),
+                belongingness=user_context.get("belongingness"),
+                team_size=user_context.get("team_size"),
+                org_total_users=user_context.get("org_total_users"),
+            ),
+            generated_at=datetime.utcnow().isoformat(),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing chat request: {str(e)}",
+        )

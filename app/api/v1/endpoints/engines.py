@@ -562,7 +562,7 @@ def list_users(
                 "user_hash": user_hash,
                 "name": name,
                 "role": role,
-                "risk_level": risk_level or "CALIBRATING",
+                "risk_level": risk_level or "LOW",
                 "velocity": velocity or 0.0,
                 "confidence": confidence or 0.0,
                 "updated_at": updated_at.isoformat() if updated_at else None,
@@ -739,7 +739,6 @@ def get_dashboard_summary(
             "critical": risk_counts.get("CRITICAL", 0),
             "elevated": risk_counts.get("ELEVATED", 0),
             "low": risk_counts.get("LOW", 0),
-            "calibrating": risk_counts.get("CALIBRATING", 0),
         },
         "avg_velocity": round(float(avg_velocity), 2),
         "total_events": sum(user["events_ingested"] for user in result["users"])

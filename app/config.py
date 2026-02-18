@@ -2,26 +2,29 @@ import os
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
+
 class Settings(BaseSettings):
     # Default to a placeholder; user must set DATABASE_URL in env for Supabase
-    database_url: str = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/sentinel")
-    
+    database_url: str = os.getenv(
+        "DATABASE_URL", "postgresql://user:password@localhost:5432/sentinel"
+    )
+
     # Supabase Configuration
     supabase_url: str = os.getenv("SUPABASE_URL", "")
     supabase_key: str = os.getenv("SUPABASE_KEY", "")
     supabase_anon_key: str = os.getenv("SUPABASE_ANON_KEY", "")
     supabase_service_key: str = os.getenv("SUPABASE_SERVICE_KEY", "")
-    
+
     vault_salt: str = os.getenv("VAULT_SALT", "")
     encryption_key: str = os.getenv("ENCRYPTION_KEY", "")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     slack_bot_token: str = os.getenv("SLACK_BOT_TOKEN", "")
-    
+
     # LLM Configuration (LiteLLM)
     # Providers: 'gemini', 'anthropic', 'openai', etc.
     llm_provider: str = os.getenv("LLM_PROVIDER", "gemini")
-    llm_model: str = os.getenv("LLM_MODEL", "gemini-pro") 
-    llm_api_key: str = os.getenv("LLM_API_KEY", "") # Generic key for chosen provider
+    llm_model: str = os.getenv("LLM_MODEL", "gemini-pro")
+    llm_api_key: str = os.getenv("LLM_API_KEY", "")  # Generic key for chosen provider
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
 
@@ -33,9 +36,11 @@ class Settings(BaseSettings):
     simulation_mode: bool = True
     data_retention_days: int = 90
     allowed_origins: str = "http://localhost:3000,http://localhost:3001"
+    seed_password: str = os.getenv("SEED_PASSWORD", "")
 
     class Config:
         env_file = ".env"
+
 
 @lru_cache()
 def get_settings():

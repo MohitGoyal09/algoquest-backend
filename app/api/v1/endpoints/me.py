@@ -28,6 +28,7 @@ class ConsentUpdate(BaseModel):
     consent_share_with_manager: Optional[bool] = None
     consent_share_anonymized: Optional[bool] = None
 
+
 @router.get("/", response_model=dict)
 def get_my_profile(
     current_user: UserIdentity = Depends(get_current_user_identity),
@@ -84,7 +85,7 @@ def get_my_profile(
         },
         "risk": {
             "velocity": risk_score.velocity if risk_score else None,
-            "risk_level": risk_score.risk_level if risk_score else "CALIBRATING",
+            "risk_level": risk_score.risk_level if risk_score else "LOW",
             "confidence": risk_score.confidence if risk_score else 0.0,
             "thwarted_belongingness": risk_score.thwarted_belongingness
             if risk_score

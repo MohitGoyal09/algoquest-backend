@@ -26,8 +26,8 @@ class SafetyValve:
         if len(events) < 14:
             return {
                 "engine": "Safety Valve",
-                "status": "CALIBRATING",
-                "risk_level": "INSUFFICIENT_DATA",
+                "status": "INSUFFICIENT_DATA",
+                "risk_level": "LOW",
                 "days_collected": len(events),
                 "velocity": 0.0,
                 "confidence": 0.0,
@@ -268,7 +268,9 @@ class SafetyValve:
         trajectory_fn = trajectories.get(persona_type, self._trajectory_flat)
         data_points = trajectory_fn(rng)
 
-        for day_offset, (velocity, belongingness, risk_level, confidence) in enumerate(data_points):
+        for day_offset, (velocity, belongingness, risk_level, confidence) in enumerate(
+            data_points
+        ):
             timestamp = base + timedelta(days=day_offset, hours=rng.integers(9, 18))
             entry = RiskHistory(
                 user_hash=user_hash,
@@ -304,7 +306,9 @@ class SafetyValve:
                 belong = float(rng.normal(0.25, 0.05))
                 risk = "CRITICAL"
             conf = min(0.3 + day * 0.02, 0.85)
-            points.append((round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2)))
+            points.append(
+                (round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2))
+            )
         return points
 
     @staticmethod
@@ -316,7 +320,9 @@ class SafetyValve:
             belong = float(rng.normal(0.8, 0.05))
             risk = "LOW"
             conf = min(0.4 + day * 0.02, 0.9)
-            points.append((round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2)))
+            points.append(
+                (round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2))
+            )
         return points
 
     @staticmethod
@@ -328,7 +334,9 @@ class SafetyValve:
             belong = float(rng.normal(0.6, 0.05))
             risk = "LOW"
             conf = min(0.35 + day * 0.015, 0.8)
-            points.append((round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2)))
+            points.append(
+                (round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2))
+            )
         return points
 
     @staticmethod
@@ -349,6 +357,7 @@ class SafetyValve:
                 belong = float(rng.normal(0.3, 0.05))
                 risk = "CRITICAL"
             conf = min(0.3 + day * 0.02, 0.85)
-            points.append((round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2)))
+            points.append(
+                (round(vel, 2), round(max(0, belong), 2), risk, round(conf, 2))
+            )
         return points
-

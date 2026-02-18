@@ -674,7 +674,7 @@ backend/
 |--------|------|-------------|
 | `user_hash` | String(64) (PK) | User identifier |
 | `velocity` | Float | Sentiment velocity score |
-| `risk_level` | String(20) | CALIBRATING, LOW, ELEVATED, CRITICAL |
+| `risk_level` | String(20) | LOW, ELEVATED, CRITICAL |
 | `confidence` | Float | Confidence score (0-1) |
 | `thwarted_belongingness` | Float | Psychological metric |
 | `updated_at` | DateTime | Last calculation time |
@@ -750,7 +750,7 @@ AuditLogs.user_hash ────────────▶ Users.user_hash
 
 **Key Metrics**:
 - **Velocity Score**: Rate of negative sentiment change
-- **Risk Level**: CALIBRATING → LOW → ELEVATED → CRITICAL
+- **Risk Level**: LOW → ELEVATED → CRITICAL
 - **Confidence**: Statistical confidence in the assessment
 
 **Intervention Triggers**:

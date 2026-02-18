@@ -144,7 +144,7 @@ def get_my_team_dashboard(
                 "pseudonym": pseudonym,
                 "is_identified": can_identify,
                 "real_hash": str(member.user_hash) if can_identify else None,
-                "risk_level": risk["risk_level"] if risk else "CALIBRATING",
+                "risk_level": risk["risk_level"] if risk else "LOW",
                 "has_consent": bool(member.consent_share_with_manager),
                 "department": "Unknown",  # UserIdentity model has no metadata JSON column
             }
@@ -190,7 +190,6 @@ def get_my_team_dashboard(
         "LOW": risk_dist_map.get("LOW", 0),
         "ELEVATED": risk_dist_map.get("ELEVATED", 0),
         "CRITICAL": risk_dist_map.get("CRITICAL", 0),
-        "CALIBRATING": risk_dist_map.get("CALIBRATING", 0),
     }
 
     # Recent Events (Page specific)
@@ -365,7 +364,7 @@ def get_team_member_details(
             "monitoring_paused": employee.monitoring_paused_until is not None,
         },
         "risk": {
-            "current_level": risk_score.risk_level if risk_score else "CALIBRATING",
+            "current_level": risk_score.risk_level if risk_score else "LOW",
             "velocity": float(risk_score.velocity)
             if risk_score and risk_score.velocity
             else None,
@@ -552,7 +551,7 @@ def get_team_network(
             {
                 "id": pseudonym,
                 "label": pseudonym if not can_identify else f"{pseudonym} (identified)",
-                "risk_level": risk.risk_level if risk else "CALIBRATING",
+                "risk_level": risk.risk_level if risk else "LOW",
                 "is_identified": can_identify,
                 "real_hash": member.user_hash if can_identify else None,
             }

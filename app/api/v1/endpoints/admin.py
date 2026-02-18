@@ -224,7 +224,7 @@ def get_all_users(
                 if user.monitoring_paused_until
                 else None,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
-                "risk_level": risk.risk_level if risk else "CALIBRATING",
+                "risk_level": risk.risk_level if risk else "LOW",
                 "velocity": risk.velocity if risk else None,
                 "last_updated": risk.updated_at.isoformat() if risk else None,
                 "has_manager": user.manager_hash is not None,

@@ -43,9 +43,9 @@ def _get_seed_password() -> str:
 
 
 TEST_EMAILS = [
-    "admin_user@company.com",
-    "manager_one@company.com",
-    "manager_two@company.com",
+    "admin@company.com",
+    "manager.one@company.com",
+    "manager.two@company.com",
     "alex.chen@company.com",
     "sarah.jones@company.com",
     "jordan.smith@company.com",
@@ -54,6 +54,35 @@ TEST_EMAILS = [
 
 def create_auth_user(email, password):
     """Create a user in Supabase Auth via the admin API."""
+    # First, try to delete existing user with same email
+    try:
+        # Get user by email
+        search_url = f"{SUPABASE_URL}/auth/v1/admin/users?filter=email.eq.{email}"
+        search_body = json.dumps({}).encode("utf-8")
+        search_headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {SERVICE_KEY}",
+            "apikey": SERVICE_KEY,
+        }
+        search_req = urllib.request.Request(
+            search_url, data=search_body, headers=search_headers, method="GET"
+        )
+        search_resp = urllib.request.urlopen(search_req, timeout=15)
+        search_data = json.loads(search_resp.read().decode())
+
+        if search_data.get("users"):
+            user_id = search_data["users"][0]["id"]
+            # Delete existing user
+            delete_url = f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}"
+            delete_req = urllib.request.Request(
+                delete_url, headers=search_headers, method="DELETE"
+            )
+            urllib.request.urlopen(delete_req, timeout=15)
+            print(f"  [DEL] Deleted existing user: {email}")
+    except Exception as e:
+        pass  # User doesn't exist, continue
+
+    # Create new user
     url = f"{SUPABASE_URL}/auth/v1/admin/users"
     body = json.dumps(
         {
